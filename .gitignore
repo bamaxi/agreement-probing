@@ -1,0 +1,5 @@
+attention/*attention.csv
+attention/.cache/*
+.cache
+__pycache__
+.Rproj.user

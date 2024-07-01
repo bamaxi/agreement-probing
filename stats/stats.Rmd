@@ -1,0 +1,1699 @@
+---
+title: "agreement-probing-stats"
+author: "Максим Бажуков"
+date: "2024-05-11"
+output:
+  html_document: default
+  pdf_document: 
+    latex_engine: xelatex
+    keep_tex: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(readr)
+library(readxl)
+library(reshape2)
+library(ggplot2)
+
+library(lme4)
+library(lmerTest)
+library(pbkrtest)
+library(nlme)
+```
+
+```{r, echo=FALSE, include=FALSE}
+citation("lmerTest")
+```
+
+```{r, echo=FALSE, include=FALSE}
+citation("pbkrtest")
+```
+
+
+## Loading datasets
+
+```{r}
+gpt <- read_csv("gpt.csv")
+gpt_comp <- read_csv("../perplexity/ruGPT-35-13B_score_second.csv")
+rubert <- read_delim("rubert_all.csv", delim=",", locale = locale(decimal_mark = ","))
+rubert_comp <- read_csv("../perplexity/rubert_compatibility_score.csv")
+humans <- read_excel("./data number attr.xlsx")
+
+```
+We add columns encoding grammaticality kind of the sentence: `gram`(matical), (ungrammatical with) `distr`(actor), `ungram`(matical)
+
+```{r}
+rubert_comp
+```
+
+
+```{r}
+
+add_grammaticality_column <- function(df){
+  df %>% mutate(
+    kind=as.factor(case_when(
+      N1 == Pred ~ "gram",
+      (N1 != Pred) & (N2 == Pred) ~ "distr",
+      TRUE ~ "ungram"
+    )),
+    is_correct = N1 == Pred,
+    is_distractor = N2 == Pred,
+    distr_like_pl = N2 == "P" | (N2 == "S" & Group==2),
+    .after=Pred
+  )
+}
+
+convert_to_factor_columns <- function(
+  df, to_factor_columns = c("N1", "N2", "Pred", "Code")
+){
+  df %>%
+    mutate(across(all_of(to_factor_columns), as.factor))
+}
+
+```
+
+
+
+```{r}
+rubert_comp %>%
+  add_grammaticality_column(.) %>%
+  convert_to_factor_columns(.) ->
+  rubert_comp
+
+rubert_comp %>% 
+  mutate(is_distr_different = N2 != N1, .after = Pred) ->
+  rubert_comp
+  
+gpt_comp %>%
+  add_grammaticality_column(.) %>%
+  convert_to_factor_columns(.) ->
+  gpt_comp
+
+```
+
+
+
+```{r}
+rubert_comp
+```
+
+## Adding RuBERT and GPT predicted number columns
+
+We add columns that show RuBERT's preference of the correct number
+
+
+```{r}
+compute_deltas <- function(df, df_name){
+  sing_col = as.symbol(str_glue("left_{df_name}_is_singular_score"))
+  plur_col = as.symbol(str_glue("left_{df_name}_is_plural_score"))
+
+  df %>% mutate(
+    verb_correct_delta = case_when(
+      N1 == "S" ~ !!sing_col - !!plur_col,
+      N1 == "P" ~  !!plur_col - !!sing_col            # N1 == "P"
+    ),
+    verb_correct_delta2 = case_when(
+      N1 == "S" ~ !!sing_col,
+      N1 == "P" ~  !!plur_col,            # N1 == "P"
+    )
+  ) %>% mutate(
+    is_correct = N1 == Pred,
+    is_distr_different = N2 != N1,
+    .after = Pred
+  )
+}
+
+expand_scores <- function(df){
+  df %>%
+    # we delete dataset-level Pred because it will cause duplicates
+    filter(Pred == "S") %>%
+    pivot_longer(matches("left_.*_score"), names_to = "Pred2", values_to = "score")  %>%
+    mutate(Pred2 = if_else(str_detect(Pred2, "singular"), "S", "P"))
+}
+```
+
+
+```{r}
+rubert_comp %>%
+  compute_deltas(., "bert") ->
+  rubert_comp
+
+gpt_comp %>%
+  compute_deltas(., "gpt") ->
+  gpt_comp
+```
+
+
+These models only saw words before Pred (1 to 3), as such, actual Pred number of the sentences didn't influence them.
+Thus scores of sentences N1=N2=X, Pred=P and N1=N2=X, Pred=S are exactly the same
+
+
+```{r}
+show_left_scores <- function(df, df_name){
+  text_left_col = as.symbol(ifelse(df_name=="gpt", "left", "masked_left"))
+  
+  df %>%
+    arrange(Sent, N1, N2, Pred) %>%
+    select(N1, N2, Pred, Code, !!text_left_col, contains("left") & contains("score"))
+}
+
+```
+
+
+```{r} 
+rubert_comp %>%
+  show_left_scores(., "bert")
+
+```
+
+```{r}
+summarise_delta <- function(df){
+  df %>%
+    group_by(N1, N2, Pred) %>%
+    summarise(
+      across(verb_correct_delta,
+             list(mean=mean, median=median)
+      )
+    )
+}
+```
+
+
+```{r}
+rubert_comp %>%
+  summarise_delta()
+```
+
+
+```{r}
+rubert_comp %>%
+  ggplot(aes(x=Pred, y=verb_correct_delta, fill=Pred)) +
+  geom_violin() +
+  geom_boxplot(width=0.1, fill="white") +
+  facet_wrap(N1 ~ N2, labeller = label_both)
+```
+
+
+Naturally, this is true for GPT too.
+
+```{r}
+gpt_comp %>%
+    show_left_scores(., "gpt")
+```
+
+```{r}
+gpt_comp %>%
+  summarise_delta()
+
+```
+
+```{r}
+gpt_comp %>%
+  ggplot(aes(x=Pred, y=verb_correct_delta, fill=Pred)) +
+  geom_violin() +
+  geom_boxplot(width=0.1, fill="white") +
+  facet_wrap(N1 ~ N2, labeller = label_both)
+```
+
+
+
+So, to avoid using duplicate data, we leave data for only one Pred (it doesn't matter which). 
+
+
+```{r}
+nrow(rubert_comp)
+
+rubert_comp %>%
+  filter(Pred == "S") -> 
+  rubert_comp
+
+nrow(rubert_comp)
+
+
+rubert_comp %>%
+  write_csv(., "rubert_delta_comp.csv")
+```
+
+```{r}
+colnames(rubert_comp)
+```
+
+```{r}
+nrow(gpt_comp)
+
+gpt_comp %>%
+  filter(Pred == "S") -> 
+  gpt_comp
+
+nrow(gpt_comp)
+
+
+gpt_comp %>%
+  write_csv(., "gpt_delta_comp.csv")
+```
+
+```{r}
+colnames(gpt_comp)
+```
+
+## Stat Functions
+
+
+```{r}
+test_lmer_signif_KR <- function(model, x_vars, categorial=FALSE){
+  res <- data.frame()
+  
+  print(model)
+  for (var in x_vars){
+    reduced_model = update(model, as.formula(paste("~ . -", var)))
+    
+    # print(var)
+    # print(reduced_model)
+    
+    comp = KRmodcomp(model, reduced_model)
+    # print(comp$test)
+
+    var_df <- comp$test[1, c("stat", "ddf", "p.value")]
+    var_df$mod_is_singular = isSingular(reduced_model)
+    rownames(var_df) <- c(var)
+    
+    res <- rbind(res, var_df)
+  }
+  
+  res %>%
+    tibble::rownames_to_column(., "factor") %>%
+    pivot_wider(
+      names_from = factor, 
+      values_from = !factor, 
+      names_glue = "{factor}_KR_{.value}"
+    )
+}
+```
+
+
+## Reporting functions
+
+### Functions to fetch the relevant part of the dataframe
+
+```{r}
+
+make_subj_col <- function(i){
+  paste0("sh", i)
+}
+
+make_obj_col <- function(i){
+  paste0("oh", i)
+}
+
+make_df_for_head <- function(df, head_i){
+  # i = 5
+
+  full_attention_cols = c("subj_attention", "obj_attention")
+  
+  subject_head_col = paste("sh", head_i, sep="")
+  object_head_col = paste("oh", head_i, sep="")
+  used_attention_cols = c(subject_head_col, object_head_col)
+  
+  return (df %>%
+    select(
+      !!used_attention_cols
+      | (!starts_with("sh") & !starts_with("oh") & !(!!full_attention_cols))
+    ))
+}
+
+
+make_meta_info <- function(i, model_name, ...){
+  meta_info <- data.frame(i, model_name)
+  names(meta_info) <- c("i", "model")
+  
+  meta_info
+}
+
+
+```
+
+
+### Functions to fetch info
+
+```{r}
+lmer_model_info_to_df <- function(lmer_model, ...){
+  call = as.character(lmer_model@call)
+  call = paste0(call[1], "(", call[2], ", data=", call[3],  ")")
+  
+  optinfo = lmer_model@optinfo
+  optimizer = optinfo$optimizer
+  
+  if (! ("messages" %in% names(optinfo$conv$lme4) )){
+    optimizer_message = optinfo$message
+  } else {
+    optimizer_message = paste(optinfo$conv$lme4$messages, collapse = "; ")
+  }
+  
+  n_observations = nobs(lmer_model)
+  
+  n_rand_effect_groups = ngrps(lmer_model)
+  colnames(n_rand_effect_groups) <- rownames(n_rand_effect_groups)
+  rownames(n_rand_effect_groups) <- NULL
+  
+  data.frame(cbind(
+    call, n_observations, n_rand_effect_groups,
+    optimizer, optimizer_message
+  ))
+}
+```
+
+```{r}
+coeffs_from_summary_to_df <- function(
+  model_summary, categorial=FALSE, ...
+){
+  model.coeffs = model_summary$coefficients
+  df = data.frame(model.coeffs, check.names=FALSE)
+  df = tibble::rownames_to_column(df, "factor")
+  
+  if (categorial){
+    p_value_col = "Pr(>|z|)"
+  } else {
+    p_value_col = "Pr(>|t|)"
+  }
+  # print(c(categorial, p_value_col))
+  
+  df %>% mutate(
+    factor = case_when(
+        factor=="(Intercept)" ~ "Intercept",
+        str_detect(factor, "^Y") ~ substr(factor, 1, 3),
+        TRUE ~ factor
+    )
+  ) %>% rename(
+    p.value = p_value_col,
+    stdError = "Std. Error"
+  ) -> df
+  
+  df %>% pivot_wider(
+    names_from = factor, 
+    values_from = !factor, 
+    names_glue = "{factor}_{.value}"
+  )
+}
+```
+
+
+```{r}
+extra_info_from_summary_to_df <- function(model_summary, ...){
+  REML_df <- data.frame(model_summary$AICtab)
+  colnames(REML_df) <- rownames(REML_df)
+  rownames(REML_df) <- NULL
+  
+  loglik_df <- data.frame(model_summary$logLik)
+  colnames(loglik_df) <- c("logLik")
+  
+  bind_cols(REML_df, loglik_df)
+}
+
+extra_info_from_summary_to_df_cat <- function(model_summary, ...){
+  bind_rows(model_summary$AICtab)
+}
+```
+
+
+```{r}
+get_full_lmer_info <- function(model, model_summary, categorial=FALSE, ...){
+  
+  model.coeffs = coeffs_from_summary_to_df(model_summary, categorial=categorial, ...)
+  model_info = lmer_model_info_to_df(model, ...)
+  
+  if (categorial){
+    extra_fit_info = extra_info_from_summary_to_df_cat(model_summary, ...)  
+  }
+  else {
+    extra_fit_info = extra_info_from_summary_to_df(model_summary, ...)  
+  }
+  
+  # print(c(dim(model.coeffs), dim(model_info), dim(extra_fit_info)))
+  
+  bind_cols(model_info, extra_fit_info, model.coeffs)
+}
+```
+
+
+## Model and human preference of the correct number
+
+### Plots
+
+```{r}
+rubert_comp %>%
+  # mutate(kind = factor(kind, levels=c("ungram", "distr", "gram"))) %>%
+  group_by(N1, distr_like_pl) %>%
+  summarise(across(verb_correct_delta, list(mean=mean, median=median, sd=sd)))
+```
+
+
+
+```{r}
+rubert_comp %>%
+  mutate(kind = factor(kind, levels=c("ungram", "distr", "gram"))) %>%
+  group_by(kind) %>%
+  summarise(across(verb_correct_delta, list(mean=mean, median=median, sd=sd)))
+```
+
+```{r}
+rubert_comp %>%
+  mutate(kind = factor(kind, levels=c("ungram", "distr", "gram"))) %>%
+  ggplot(aes(x=kind, y=verb_correct_delta)) +
+    geom_violin() +
+    geom_boxplot(width=0.1, fill="white") +
+    labs(title="RUBERT")
+```
+
+
+```{r}
+gpt_comp %>%
+  # mutate(kind = factor(kind, levels=c("ungram", "distr", "gram"))) %>%
+  group_by(N1, distr_like_pl) %>%
+  summarise(across(verb_correct_delta, list(mean=mean, median=median, sd=sd)))
+```
+
+
+```{r}
+gpt_comp %>%
+  mutate(kind = factor(kind, levels=c("ungram", "distr", "gram"))) %>%
+  group_by(kind) %>%
+  summarise(across(verb_correct_delta, list(mean=mean, median=median, sd=sd)))
+```
+
+```{r}
+gpt_comp %>%
+  mutate(kind = factor(kind, levels=c("ungram", "distr", "gram"))) %>%
+  ggplot(aes(x=kind, y=verb_correct_delta)) +
+    geom_violin() +
+    geom_boxplot(width=0.1, fill="white")
+```
+
+### 3-valued kind calculation, distinct pred
+
+```{r}
+rubert_comp
+```
+
+```{r}
+make_kind2_scores <- function(df){
+  df %>%
+    expand_scores() %>%
+    mutate(
+      kind2=as.factor(case_when(
+        N1 == Pred2 ~ "gram",
+        (N1 != Pred2) & (N2 == Pred2) ~ "distr",
+        TRUE ~ "ungram"
+      )),
+      .after=Pred2
+    )
+}
+```
+
+```{r}
+rubert_comp %>%
+  make_kind2_scores() ->
+  rubert_comp_scores
+
+rubert_comp_scores
+```
+
+
+```{r}
+gpt_comp %>%
+  make_kind2_scores() ->
+  gpt_comp_scores
+
+gpt_comp_scores
+```
+
+
+```{r}
+mod5_rubert = lmer(score ~ N1 + N2 + kind2 + (1 | Sent), data=rubert_comp_scores)
+summary(mod5_rubert)
+
+info5_rubert <- get_full_lmer_info(mod5_rubert, summary(mod5_rubert))
+
+mod5KR_rubert <- test_lmer_signif_KR(mod5_rubert, c("N1", "N2", "kind2"))
+mod5KR_rubert
+```
+
+
+
+```{r}
+mod5_gpt = lmer(score ~ N1 + N2 + kind2 + (1 | Sent), data=gpt_comp_scores)
+summary(mod5_gpt)
+
+info5_gpt <- get_full_lmer_info(mod5_gpt, summary(mod5_gpt))
+
+mod5KR_gpt <- test_lmer_signif_KR(mod5_gpt, c("N1", "N2", "kind2"))
+mod5KR_gpt
+```
+
+
+#### by Group
+
+```{r}
+rubert_comp_scores %>% filter(Group == 1) -> rubert_comp_scores_acc
+
+mod5_rubert_acc = lmer(score ~ N1 + N2 + kind2 + (1 | Sent), data=rubert_comp_scores_acc)
+summary(mod5_rubert_acc)
+
+info5_rubert_acc <- get_full_lmer_info(mod5_rubert_acc, summary(mod5_rubert_acc))
+
+mod5KR_rubert_acc <- test_lmer_signif_KR(mod5_rubert_acc, c("N1", "N2", "kind2"))
+mod5KR_rubert_acc
+```
+
+
+```{r}
+rubert_comp_scores %>%
+  filter(Group == 2) ->
+  rubert_comp_scores_gen
+
+mod5_rubert_gen = lmer(score ~ N1 + N2 + kind2 + (1 | Sent), data=rubert_comp_scores_gen)
+summary(mod5_rubert_gen)
+
+info5_rubert_gen <- get_full_lmer_info(mod5_rubert_gen, summary(mod5_rubert_gen))
+
+mod5KR_rubert_gen <- test_lmer_signif_KR(mod5_rubert_gen, c("N1", "N2", "kind2"))
+mod5KR_rubert_gen
+```
+
+Group 2 is genitive, which is syncretic like Nom.Pl = Gen.Sg (!= Acc.Pl)
+
+```{r}
+rubert_comp_scores %>%
+  filter(Group == 2) %>%
+  mutate(
+    kind3=as.factor(case_when(
+      N1 == Pred2 ~ "gram",
+      (N1 != Pred2) & (N2 != Pred2) ~ "distr",
+      TRUE ~ "ungram"
+    )),
+    .after=Pred2
+  ) ->
+  rubert_comp_scores_gen_syncr
+
+mod5_rubert_gen_syncr = lmer(score ~ N1 + N2 + kind3 + (1 | Sent), data=rubert_comp_scores_gen_syncr)
+summary(mod5_rubert_gen_syncr)
+
+info5_rubert_gen_syncr <- get_full_lmer_info(mod5_rubert_gen_syncr, summary(mod5_rubert_gen_syncr))
+
+mod5KR_rubert_gen_syncr <- test_lmer_signif_KR(mod5_rubert_gen_syncr, c("N1", "N2", "kind3"))
+mod5KR_rubert_gen_syncr
+```
+
+
+
+```{r}
+gpt_comp_scores %>%
+  filter(Group==1) ->
+  gpt_comp_scores_acc
+
+mod5_gpt_acc = lmer(score ~ N1 + N2 + kind2 + (1 | Sent), data=gpt_comp_scores_acc)
+summary(mod5_gpt_acc)
+
+info5_gpt_acc <- get_full_lmer_info(mod5_gpt_acc, summary(mod5_gpt_acc))
+
+mod5KR_gpt_acc <- test_lmer_signif_KR(mod5_gpt_acc, c("N1", "N2", "kind2"))
+mod5KR_gpt_acc
+
+```
+
+```{r}
+gpt_comp_scores %>%
+  filter(Group==2) ->
+  gpt_comp_scores_gen
+
+mod5_gpt_gen = lmer(score ~ N1 + N2 + kind2 + (1 | Sent), data=gpt_comp_scores_gen)
+summary(mod5_gpt_gen)
+
+info5_gpt_gen <- get_full_lmer_info(mod5_gpt_gen, summary(mod5_gpt_gen))
+
+mod5KR_gpt_gen <- test_lmer_signif_KR(mod5_gpt_gen, c("N1", "N2", "kind2"))
+mod5KR_gpt_gen
+```
+
+
+
+### other model plots
+
+```{r}
+rubert_comp %>%
+  group_by(N1, N2, Pred) %>%
+  summarise(
+    across(verb_correct_delta,
+           list(mean=mean, median=median)
+    )
+  )
+```
+
+
+```{r}
+rubert_comp %>%
+  ggplot(aes(x=Pred, y=verb_correct_delta, fill=Pred)) +
+  geom_violin() +
+  geom_boxplot(width=0.1, fill="white") +
+  facet_wrap(N1 ~ N2, labeller = label_both)
+  
+```
+
+### accuracy
+
+```{r}
+
+rubert_comp %>%
+  mutate(
+    verb_correct = verb_correct_delta > 0,
+    # particip_correct = particip_correct_delta > 0,
+    # pred_correct = pred_correct_delta > 0
+  ) %>%
+  summarise(
+    n_verb_correct = sum(verb_correct),
+    n_verb_wrong = length(verb_correct) - sum(verb_correct),
+    # n_particip_correct = sum(particip_correct),
+    # n_particip_wrong = length(particip_correct) - sum(particip_correct),
+    # n_pred_correct = sum(pred_correct),
+    # n_pred_wrong = length(pred_correct) - sum(pred_correct)
+  )
+
+```
+
+
+```{r}
+
+rubert_comp %>%
+  mutate(
+    verb_correct = verb_correct_delta > 0,
+  ) %>%
+  group_by(Code) %>%
+  summarise(
+    n_verb_correct = sum(verb_correct),
+    n_verb_wrong = length(verb_correct) - sum(verb_correct),
+  )
+
+```
+
+
+```{r}
+rubert_comp %>%
+  mutate(verb_correct = verb_correct_delta > 0) %>%
+  group_by(N1, N2) %>%
+  summarise(ratio_correct = mean(verb_correct))
+```
+
+
+```{r}
+gpt_comp %>%
+  mutate(verb_correct = verb_correct_delta > 0) %>%
+  group_by(N1, N2) %>%
+  summarise(ratio_correct = mean(verb_correct))
+```
+
+#### Other regression models
+
+```{r}
+mod <- lmer(verb_correct_delta ~ N1 + N2 +  (1 | Sent), data=rubert_comp)
+summary(mod)
+```
+
+```{r}
+test_lmer_signif_KR(mod, c("N1", "N2"))
+```
+
+
+```{r}
+rubert_comp %>% 
+  filter(Group == 1) ->
+  rubert_comp_acc
+
+mod2 <- lmer(verb_correct_delta ~ N1 + N2 + Group + is_distr_different + (1 | Sent), data=rubert_comp)
+summary(mod2)
+
+info2 <- get_full_lmer_info(mod2, summary(mod2))
+
+```
+
+```{r}
+mod2KR = test_lmer_signif_KR(mod2, c("N1", "N2", "is_distr_different"))
+mod2KR
+```
+
+```{r}
+cbind(info2, mod2KR) %>%
+  write_csv("bert_lmer_results.csv")
+```
+
+
+```{r}
+mod2_gpt = lmer(verb_correct_delta ~ N1 + N2 + is_distr_different + (1 | Sent), data=gpt_comp)
+summary(mod2_gpt)
+
+info2_gpt <- get_full_lmer_info(mod2_gpt, summary(mod2_gpt))
+
+mod2KR_gpt <- test_lmer_signif_KR(mod2_gpt, c("N1", "N2", "is_distr_different"))
+mod2KR_gpt
+```
+
+```{r}
+cbind(info2_gpt, mod2KR_gpt) %>%
+  write_csv("gpt_lmer_results.csv")
+```
+
+
+
+```{r}
+mod3 <- lmer(verb_correct_delta ~ N1 * N2 +  (1 | Sent), data=rubert_comp)
+summary(mod3)
+```
+
+```{r}
+mod4 <- lmer(verb_correct_delta2 ~ N1 + N2 + is_distr_different + (1 | Sent), data=rubert_comp)
+summary(mod4)
+```
+
+
+
+### Humans
+
+```{r}
+humans
+```
+
+
+```{r}
+humans %>% pull(part) %>% unique() %>% length()
+```
+
+
+```{r}
+humans_word4 = humans %>% filter(reg == 4)
+humans_word4
+
+humans_word5 = humans %>% filter(reg == 5)
+humans_word5
+
+```
+
+There are 80 sentences in the experiment where response time was measured 
+
+```{r}
+humans %>% pull(sent) %>% unique()
+```
+
+
+```{r}
+humans_word4 %>%
+  filter(sent=="S1") %>%
+  select(part, sent, subj, pred, rt) %>%
+  arrange(part, sent,  subj, pred)
+```
+
+
+
+```{r}
+humans_word4 %>%
+  select(part, sent, subj, pred, rt) %>%
+  # group_by(part, sent, subj) %>%
+  arrange(part, sent,  subj) %>%
+  pivot_wider(names_from = pred, values_from = rt)
+
+```
+
+
+```{r}
+humans %>%
+  separate_wider_delim(
+      "subj", "-", names = c("N1", "N2")
+  ) %>%
+  mutate(is_distr_different = N2 != N1) %>%
+  mutate(
+    kind=as.factor(case_when(
+      N1 == pred ~ "gram",
+      (N1 != pred) & (N2 == pred) ~ "distr",
+      TRUE ~ "ungram"
+    )),
+    is_correct = N1 == pred,
+    is_distractor = N2 == pred,
+    .after=pred
+  ) -> humans
+
+humans
+```
+
+The effect is visible on word 5
+
+```{r}
+humans %>%
+  filter(reg == 5) %>%
+  mutate(kind = factor(kind, levels=c("ungram", "distr", "gram"))) %>%
+  group_by(kind) %>%
+  summarise(mean=mean(rt, na.rm=TRUE), median=median(rt, na.rm=TRUE), sd=sd(rt, na.rm=TRUE))
+```
+
+
+
+```{r}
+humans %>%
+  filter(reg == 5) %>%
+  mutate(kind = factor(kind, levels=c("ungram", "distr", "gram"))) %>%
+  ggplot(aes(x=kind, y=rt)) +
+    geom_violin() +
+    geom_boxplot(width=0.1, fill="white")
+    # facet_wrap(N1 ~ N2, labeller = label_both)
+```
+
+
+```{r}
+humans_word5 = humans %>% filter(reg == 5)
+
+# humans_word5_acc = humans_word5 %>% filter(group==1)
+  
+lmer(rt ~ N1 + N2 + kind + (1 | sent) + (1|part),
+     data=humans_word5) ->
+  mod5_humans
+
+summary(mod5_humans)
+
+info5_humans <- get_full_lmer_info(mod5_humans, summary(mod5_humans))
+
+mod5KR_humans <- test_lmer_signif_KR(mod5_humans, c("N1", "N2", "kind"))
+mod5KR_humans
+```
+
+
+```{r}
+humans_word5_acc = humans %>% filter(reg == 5) %>% filter(group == 1)
+
+lmer(rt ~ N1 + N2 + kind + (1 | sent) + (1|part),
+     data=humans_word5_acc) ->
+  mod5_humans_acc
+
+summary(mod5_humans_acc)
+
+info5_humans_acc <- get_full_lmer_info(mod5_humans_acc, summary(mod5_humans_acc))
+
+mod5KR_humans_acc <- test_lmer_signif_KR(mod5_humans_acc, c("N1", "N2", "kind"))
+mod5KR_humans_acc
+```
+
+
+
+```{r}
+humans_word5_gen = humans %>% filter(reg == 5) %>% filter(group == 2)
+
+# humans_word5_acc = humans_word5 %>% filter(group==1)
+  
+lmer(rt ~ N1 + N2 + kind + (1 | sent) + (1|part),
+     data=humans_word5_gen) ->
+  mod5_humans_gen
+
+summary(mod5_humans_gen)
+
+info5_humans_gen <- get_full_lmer_info(mod5_humans_gen, summary(mod5_humans_gen))
+
+mod5KR_humans_gen <- test_lmer_signif_KR(mod5_humans_gen, c("N1", "N2", "kind"))
+mod5KR_humans_gen
+```
+
+
+There is no effect on word 4 however (these results are like Slioussar's)
+
+```{r}
+humans_word4 = humans %>% filter(reg == 4)
+
+# humans_word5_acc = humans_word5 %>% filter(group==1)
+  
+lmer(rt ~ N1 + N2 + kind + (1 | sent) + (1|part),
+     data=humans_word4) ->
+  mod5_humans_word4
+
+summary(mod5_humans_word4)
+
+info5_humans_word4 <- get_full_lmer_info(mod5_humans_word4, summary(mod5_humans_word4))
+
+mod5KR_humans_word4 <- test_lmer_signif_KR(mod5_humans_word4, c("N1", "N2", "kind"))
+mod5KR_humans_word4
+```
+
+
+## LMER number of each word to attention values
+
+```{r}
+eval_model <- function(formula, data){
+  eval(bquote(lmer(formula, data=data)))
+}
+```
+
+
+```{r}
+
+fit_lmer_on_df <- function(
+    model_df, model_name, n_heads, x_vars, x_random=NULL, use_heads="both", y=NULL
+){
+  # stopifnot(!is.null(y) || use_heads %in% c("both", "subject", "object"))
+  stopifnot(use_heads %in% c("both", "subject", "object"))
+  
+  x_vars2 = x_vars
+  if (use_heads == "both"){
+    x_vars2 = c("Y", x_vars2)
+  }
+  params = list(
+    model_name=model_name, n_heads=n_heads,
+    x_vars=x_vars, x_vars2=x_vars2, x_random=x_random, use_heads=use_heads
+  )
+  
+  
+  base_x = paste(x_vars, collapse=" + ")
+  if (!is.null(x_random)) {
+    x_random = paste0("(", paste(x_random, collapse = "+"), ")")
+    base_x = paste(base_x, "+", x_random)
+  }
+  
+  
+  results = tibble()
+  
+  for (i in 1:n_heads){
+    meta_info = make_meta_info(i, model_name)
+    df_i = make_df_for_head(model_df, i)
+    
+    subject = make_subj_col(i)
+    object = make_obj_col(i)
+    
+    prepared_df_i = df_i
+    
+    x = base_x
+    if (use_heads == "both"){
+      # https://stackoverflow.com/questions/20525633/r-analyzing-multiple-responses-i-e-dependent-variables-in-a-mixed-effects-mo 
+      # https://stackoverflow.com/questions/69960107/using-lmer-for-multiple-dependent-variables
+      x = paste("Y", "+", x)
+      y = "value"
+      # we melt sh[i], oh[i] which are columns 1 abd 2 respectively
+      df_i %>%
+          melt(., id.vars = 3:ncol(.), variable.name = "Y") %>% 
+          tibble() %>% 
+          arrange(Y) -> 
+        prepared_df_i
+  
+    } else if (use_heads == "subject") {
+      y = subject
+    } else if (use_heads == "object") {
+      y = object
+    }
+    
+    formula = as.formula(
+      paste(y, "~", x)
+    )
+    
+    # print(formula)
+    # print(prepared_df_i)
+    
+    
+    model_i <- do.call("lmer", list(formula = formula, data = quote(prepared_df_i)))
+    summary_i = summary(model_i)
+    
+    vars_significance_i = test_lmer_signif_KR(model_i, x_vars2)
+    
+    result_i = get_full_lmer_info(model_i, summary_i)
+    result_i = cbind(meta_info, result_i, vars_significance_i)
+    
+    
+    results <- bind_rows(results, result_i)
+  }
+  
+  list(
+    results = results,
+    params = params
+  )
+}
+  
+  
+```
+
+### "both" - subject and object heads values merged
+
+```{r}
+# 12 heads
+
+rubert_result <- fit_lmer_on_df(
+  rubert, "rubert", 12, 
+  c("N1", "N2", "Pred"), c("1 | Sent"), use_heads="both"
+)
+
+rubert_result$params
+rubert_result$results
+
+# write_csv(rubert_result$results, "rubert_stats_2.csv")
+```
+
+```{r}
+colnames(gpt)
+```
+
+
+```{r}
+# 40 heads...
+
+gpt_result <- fit_lmer_on_df(
+  gpt, "gpt", 40, 
+  c("N1", "N2", "Pred"), c("1 | Sent"), use_heads="both"
+)
+
+gpt_result$params
+gpt_result$results
+
+# write_csv(gpt_result$results, "gpt_stats.csv")
+```
+
+
+## LMER grammaticality kind to head
+
+
+```{r}
+HEAD_KIND_NAME = "Y"
+MELTED_HEADS_NAME = "value"
+SUBJECT_HEAD = "subject"
+DISTRACTOR_HEAD = "object"
+
+make_formula <- function(
+    x_vars, x_random=NULL,
+    y
+){
+  base_x = paste(x_vars, collapse=" + ")
+  if (!is.null(x_random)) {
+    x_random = paste0("(", paste(x_random, collapse = "+"), ")")
+    base_x = paste(base_x, "+", x_random)
+  }
+  
+
+  x = base_x
+  if (y == SUBJECT_HEAD){
+    y = quote(subject)
+    formula = quote(paste(eval(y), "~", x))
+    
+  } else if (y == DISTRACTOR_HEAD){
+    y = quote(object)
+    formula = quote(paste(eval(y), "~", x))
+    
+  } else {
+    formula = paste(y, "~", x)
+  }
+    
+  list(x=x, y=y, formula=formula)
+}
+
+
+fit_lmer_on_df2 <- function(
+    model_df, model_name, n_heads, x_vars, x_random=NULL, y
+    , try_interaction_KR=FALSE
+    , categorial_y = FALSE
+){
+  stat_model_to_call = "lmer"
+  call_args = list()
+  if (categorial_y){
+    stat_model_to_call = "glmer"
+    call_args$family = "binomial"
+  }
+  
+  use_heads=FALSE
+  if (y == MELTED_HEADS_NAME){
+    use_heads="both"
+  }
+  
+  has_interaction_terms = FALSE
+  for (x_var in x_vars){
+    if (str_detect(x_var, ":")){
+      has_interaction_terms = TRUE
+      break
+    }
+  }
+  
+  params = list(
+    model_name=model_name, n_heads=n_heads,
+    x_vars=x_vars, x_random=x_random,
+    y=y, use_heads=use_heads
+  )
+  
+  formula_info = make_formula(x_vars, x_random, y)
+  base_formula = formula_info$formula
+  
+  # print(formula_info)
+  # print(formula)
+  
+  models = c()
+  results = tibble()
+  
+  for (i in 1:n_heads){
+    meta_info = make_meta_info(i, model_name)
+    df_i = make_df_for_head(model_df, i)
+    
+    subject = make_subj_col(i)
+    object = make_obj_col(i)
+    
+    prepared_df_i = df_i
+    
+    if (use_heads == "both"){
+      # https://stackoverflow.com/questions/20525633/r-analyzing-multiple-responses-i-e-dependent-variables-in-a-mixed-effects-mo 
+      # https://stackoverflow.com/questions/69960107/using-lmer-for-multiple-dependent-variables
+      # we melt sh[i], oh[i] which are columns 1 and 2 respectively
+      df_i %>%
+          melt(., id.vars = 3:ncol(.), variable.name = HEAD_KIND_NAME) %>% 
+          tibble() %>% 
+          arrange(HEAD_KIND_NAME) -> 
+        prepared_df_i
+      
+    } 
+    
+    formula = eval(base_formula, formula_info)
+    formula = as.formula(formula)
+
+
+    call_args <- modifyList(
+      call_args,
+      list(formula = formula, data = quote(prepared_df_i))
+    )
+    model_i <- do.call(
+      stat_model_to_call,
+      call_args  
+    )
+    summary_i = summary(model_i)
+    models = c(models, model_i)
+    
+    result_i = get_full_lmer_info(model_i, summary_i, categorial=categorial_y)
+    
+    if (!categorial_y && (!has_interaction_terms | try_interaction_KR)){
+      vars_significance_i = test_lmer_signif_KR(model_i, x_vars)
+      result_i = cbind(meta_info, result_i, vars_significance_i)
+    } else {
+      result_i = cbind(meta_info, result_i)
+    }
+    
+    results <- bind_rows(results, result_i)
+  }
+  
+  list(
+    results = results,
+    params = params,
+    models=models
+  )
+}
+  
+```
+
+
+### without interaction terms
+
+```{r}
+rubert_result <- fit_lmer_on_df2(
+  rubert, "rubert", 12, 
+  c("N1", "N2", "Pred"), c("1 | Sent"),
+  SUBJECT_HEAD
+  # , use_heads="both"
+)
+
+rubert_result$params
+rubert_result$results
+
+# write_csv(rubert_result$results, "rubert_stats_tosubject.csv")
+```
+
+
+```{r}
+rubert_result <- fit_lmer_on_df2(
+  rubert, "rubert", 12, 
+  c("N1", "N2", "Pred"), c("1 | Sent"),
+  DISTRACTOR_HEAD
+  # , use_heads="both"
+)
+
+rubert_result$params
+rubert_result$results
+
+# write_csv(rubert_result$results, "rubert_stats_todistractor.csv")
+```
+
+```{r}
+rubert_result <- fit_lmer_on_df2(
+  rubert, "rubert", 12, 
+  c("Y", "N1", "N2", "Pred"), c("1 | Sent"),
+  MELTED_HEADS_NAME
+  # , use_heads="both"
+)
+
+rubert_result$params
+rubert_result$results
+
+# write_csv(rubert_result$results, "rubert_stats_todistractor.csv")
+```
+
+
+
+```{r}
+gpt_result <- fit_lmer_on_df2(
+  gpt, "gpt", 40, 
+  c("N1", "N2", "Pred"), c("1 | Sent"),
+  SUBJECT_HEAD
+  # , use_heads="both"
+)
+
+gpt_result$params
+gpt_result$results
+
+# write_csv(gpt_result$results, "gpt_stats_tosubject.csv")
+
+```
+
+
+```{r}
+gpt_result <- fit_lmer_on_df2(
+  gpt, "gpt", 40, 
+  c("N1", "N2", "Pred"), c("1 | Sent"),
+  DISTRACTOR_HEAD
+  # , use_heads="both"
+)
+
+gpt_result$params
+gpt_result$results
+
+# write_csv(gpt_result$results, "gpt_stats_todistractor.csv")
+```
+
+
+### with interaction terms
+
+#### RuBERT
+
+```{r}
+rubert_result <- fit_lmer_on_df2(
+  rubert, "rubert", 12, 
+  c(
+    "N1", "N2", "Pred"
+    , "Pred:N1", "Pred:N2"
+    , "Pred:N1:N2"
+    ),
+  c("1 | Sent"),
+  MELTED_HEADS_NAME
+  # , use_heads="both"
+)
+
+rubert_result$params
+rubert_result$results
+
+# write_csv(rubert_result$results, "rubert_stats_toboth_int.csv")
+
+
+```
+
+```{r}
+# rubert_result <- fit_lmer_on_df2(
+#   rubert, "rubert", 12, 
+#   c(
+#     "N1", "N2", "Pred"
+#     , "Pred:N1", "Pred:N2"
+#     , "Pred:N1:N2"
+#     ),
+#   c("1 | Sent"),
+#   MELTED_HEADS_NAME
+#   , try_interaction_KR = TRUE
+# )
+
+# rubert_result$params
+# rubert_result$results
+# 
+# write_csv(rubert_result$results, "rubert_stats_toboth_int_KR.csv")
+```
+
+
+```{r}
+rubert_result <- fit_lmer_on_df2(
+  rubert, "rubert", 12, 
+  c(
+    "N1", "N2", "Pred"
+    , "Pred:N1", "Pred:N2"
+    , "Pred:N1:N2"
+    ),
+  c("1 | Sent"),
+  SUBJECT_HEAD
+)
+
+rubert_result$params
+rubert_result$results
+
+# write_csv(rubert_result$results, "rubert_stats_tosubject_int.csv")
+```
+
+```{r}
+# rubert_result <- fit_lmer_on_df2(
+#   rubert, "rubert", 12, 
+#   c(
+#     "N1", "N2", "Pred"
+#     , "Pred:N1", "Pred:N2"
+#     , "Pred:N1:N2"
+#     ),
+#   c("1 | Sent"),
+#   SUBJECT_HEAD,
+#   try_interaction_KR = TRUE
+# )
+
+# rubert_result$params
+# rubert_result$results
+# 
+# write_csv(rubert_result$results, "rubert_stats_tosubject_int_KR.csv")
+```
+
+
+```{r}
+rubert_result <- fit_lmer_on_df2(
+  rubert, "rubert", 12,
+  c(
+    "N1", "N2", "Pred"
+    , "Pred:N1", "Pred:N2"
+    , "Pred:N1:N2"
+    ),
+  c("1 | Sent"),
+  DISTRACTOR_HEAD
+)
+
+rubert_result$params
+rubert_result$results
+
+# write_csv(rubert_result$results, "rubert_stats_todistractor_int.csv")
+```
+
+```{r}
+# rubert_result <- fit_lmer_on_df2(
+#   rubert, "rubert", 12,
+#   c(
+#     "N1", "N2", "Pred"
+#     , "Pred:N1", "Pred:N2"
+#     , "Pred:N1:N2"
+#     ),
+#   c("1 | Sent"),
+#   DISTRACTOR_HEAD,
+#   try_interaction_KR = TRUE
+# )
+# 
+# rubert_result$params
+# rubert_result$results
+# 
+# write_csv(rubert_result$results, "rubert_stats_todistractor_int_KR.csv")
+```
+
+
+
+#### GPT
+
+```{r}
+gpt_result <- fit_lmer_on_df2(
+  gpt, "gpt", 40, 
+  c(
+    "N1", "N2", "Pred"
+    , "Pred:N1", "Pred:N2"
+    , "Pred:N1:N2"
+  ),
+  c("1 | Sent"),
+  MELTED_HEADS_NAME
+)
+
+gpt_result$params
+gpt_result$results
+
+# write_csv(gpt_result$results, "gpt_stats_toboth.csv")
+```
+
+
+```{r}
+gpt_result <- fit_lmer_on_df2(
+  gpt, "gpt", 40, 
+  c(
+    "N1", "N2", "Pred"
+    , "Pred:N1", "Pred:N2"
+    , "Pred:N1:N2"
+  ),
+  c("1 | Sent"),
+  MELTED_HEADS_NAME,
+)
+
+gpt_result$params
+gpt_result$results
+
+# write_csv(gpt_result$results, "gpt_stats_toboth_int.csv")
+```
+
+
+```{r}
+# gpt_result <- fit_lmer_on_df2(
+#   gpt, "gpt", 40, 
+#   c(
+#     "N1", "N2", "Pred"
+#     , "Pred:N1", "Pred:N2"
+#     , "Pred:N1:N2"
+#   ),
+#   c("1 | Sent"),
+#   MELTED_HEADS_NAME,
+#   try_interaction_KR = TRUE
+# )
+# 
+# gpt_result$params
+# gpt_result$results
+# 
+# write_csv(gpt_result$results, "gpt_stats_toboth_int_KR.csv")
+```
+
+
+
+```{r}
+gpt_result <- fit_lmer_on_df2(
+  gpt, "gpt", 40, 
+  c(
+    "N1", "N2", "Pred"
+    , "Pred:N1", "Pred:N2"
+    , "Pred:N1:N2"
+  ),
+  c("1 | Sent"),
+  SUBJECT_HEAD
+)
+
+gpt_result$params
+gpt_result$results
+
+# write_csv(gpt_result$results, "gpt_stats_tosubject.csv")
+```
+
+```{r}
+gpt_result <- fit_lmer_on_df2(
+  gpt, "gpt", 40, 
+  c(
+    "N1", "N2", "Pred"
+    , "Pred:N1", "Pred:N2"
+    , "Pred:N1:N2"
+  ),
+  c("1 | Sent"),
+  SUBJECT_HEAD
+)
+
+gpt_result$params
+gpt_result$results
+
+# write_csv(gpt_result$results, "gpt_stats_tosubject_int.csv")
+```
+
+
+
+```{r}
+# gpt_result <- fit_lmer_on_df2(
+#   gpt, "gpt", 40, 
+#   c(
+#     "N1", "N2", "Pred"
+#     , "Pred:N1", "Pred:N2"
+#     , "Pred:N1:N2"
+#   ),
+#   c("1 | Sent"),
+#   SUBJECT_HEAD,
+#   try_interaction_KR = TRUE
+# )
+# 
+# gpt_result$params
+# gpt_result$results
+# 
+# write_csv(gpt_result$results, "gpt_stats_tosubject_int_KR.csv")
+```
+
+
+```{r}
+gpt_result <- fit_lmer_on_df2(
+  gpt, "gpt", 40, 
+  c(
+    "N1", "N2", "Pred"
+    , "Pred:N1", "Pred:N2"
+    , "Pred:N1:N2"
+  ),
+  c("1 | Sent"),
+  DISTRACTOR_HEAD
+)
+
+gpt_result$params
+gpt_result$results
+
+# write_csv(gpt_result$results, "gpt_stats_todistractor.csv")
+```
+
+
+```{r}
+gpt_result <- fit_lmer_on_df2(
+  gpt, "gpt", 40, 
+  c(
+    "N1", "N2", "Pred"
+    , "Pred:N1", "Pred:N2"
+    , "Pred:N1:N2"
+  ),
+  c("1 | Sent"),
+  DISTRACTOR_HEAD
+)
+
+gpt_result$params
+gpt_result$results
+
+# write_csv(gpt_result$results, "gpt_stats_todistractor_int.csv")
+```
+
+
+```{r}
+# gpt_result <- fit_lmer_on_df2(
+#   gpt, "gpt", 40, 
+#   c(
+#     "N1", "N2", "Pred"
+#     , "Pred:N1", "Pred:N2"
+#     , "Pred:N1:N2"
+#   ),
+#   c("1 | Sent"),
+#   DISTRACTOR_HEAD,
+#   try_interaction_KR = TRUE
+# )
+# 
+# gpt_result$params
+# gpt_result$results
+# 
+# write_csv(gpt_result$results, "gpt_stats_todistractor_int_KR.csv")
+```
+
+
+
+## Tests for predicted predicate number (RUBERT)
+
+```{r}
+colnames(rubert)
+```
+
+
+```{r}
+eval_over_different_y <- function(
+    model_df, model_name, n_heads=1, x_vars, x_random=NULL, y_vars,
+    name_before_first_underscore=TRUE, filename, ...
+  ){
+  full_result = NULL
+  
+  for (var in y_vars){
+    name = var
+    if (name_before_first_underscore){
+      name = str_split_1(var, "_")[1]
+    }
+    print(name)
+    
+    model_result <- fit_lmer_on_df2(
+      model_df, model_name, n_heads, 
+      x_vars, x_random,
+      var,
+      ...
+    )
+    
+    print(model_result$params)
+    print(model_result$results)
+    
+    var_result = model_result$results
+    var_result = cbind(var, var_result)
+    full_result = bind_rows(full_result, var_result)
+  }
+  
+  print(filename)
+  write_csv(full_result, filename)
+  
+  print(full_result)
+  full_result
+} 
+```
+
+### Numeric
+
+```{r}
+
+rubert %>% mutate(
+  verb_sing_score = left_bert_is_singular_score - left_bert_is_plural_score,
+  verb_num_predicted = as.factor(case_when(
+    verb_sing_score >= 0 ~ "S",
+    TRUE ~ "P"
+  )),
+  
+  particip_sing_score = pred_left_bert_is_singular_score - pred_left_bert_is_plural_score,
+  particip_num_predicted = as.factor(case_when(
+    particip_sing_score >= 0 ~ "S",
+    TRUE ~ "P"
+  )),
+  
+  predic_sing_score = pred_full_bert_is_singular_score - pred_full_bert_is_plural_score,
+  predic_num_predicted = as.factor(case_when(
+    predic_sing_score >= 0 ~ "S",
+    TRUE ~ "P"
+  ))
+) -> rubert
+
+```
+
+
+```{r}
+y_vars = c("verb_sing_score", "particip_sing_score", "predic_sing_score")
+eval_over_different_y(
+  rubert, "rubert", 1, 
+  c("N1", "N2"), c("1 | Sent"),
+  y_vars, filename = "rubert_stats_pred_number.csv"
+)
+```
+
+
+```{r}
+y_vars = c("verb_sing_score", "particip_sing_score", "predic_sing_score")
+eval_over_different_y(
+  rubert, "rubert", 1, 
+  c(
+    "N1", "N2", "Pred"
+    , "Pred:N1", "Pred:N2"
+    , "Pred:N1:N2"
+  ),
+  c("1 | Sent"),
+  y_vars, filename = "rubert_stats_pred_number_int.csv"
+)
+```
+
+
+```{r}
+# y_vars = c("verb_sing_score", "particip_sing_score", "predic_sing_score")
+# eval_over_different_y(
+#   rubert, "rubert", 1, 
+#   c(
+#     "N1", "N2", "Pred"
+#     , "Pred:N1", "Pred:N2"
+#     , "Pred:N1:N2"
+#   ),
+#   c("1 | Sent"),
+#   y_vars, filename = "rubert_stats_pred_number_int_KR.csv",
+#   try_interaction_KR=TRUE
+# )
+```

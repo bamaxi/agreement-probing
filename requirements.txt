@@ -1,0 +1,12 @@
+matplotlib
+seaborn
+pandas 
+torch~=2.0.1 
+sentencepiece==0.1.99
+accelerate==0.24.1
+bitsandbytes==0.41.3
+peft==0.7.1
+transformers
+bertviz 
+statsmodels 
+ipykernel
