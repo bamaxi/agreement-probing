@@ -1,4 +1,4 @@
-# Of Machines and Men: Probing Neural Networks for Attraction Agreement with Psycholinguistic Data
+# Of Models and Men: Probing Neural Networks for Attraction Agreement with Psycholinguistic Data
 
 ## Theoretical background
 
