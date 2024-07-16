@@ -1,12 +1,10 @@
 ---
 title: "agreement-probing-stats"
-author: "-"
-date: "2024-05-11"
 output:
-  html_document: default
   pdf_document: 
     latex_engine: xelatex
     keep_tex: yes
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -21,12 +19,21 @@ library(stringr)
 library(readr)
 library(readxl)
 library(reshape2)
+
 library(ggplot2)
+library(viridis)
+library(grid)
+library(gtable)
+library(lemon)
 
 library(lme4)
 library(lmerTest)
 library(pbkrtest)
 library(nlme)
+
+library("broom.mixed")
+
+library(extrafont)
 ```
 
 ```{r, echo=FALSE, include=FALSE}
@@ -499,6 +506,18 @@ gpt_comp %>%
 ### 3-valued kind calculation, distinct pred
 
 ```{r}
+all_coeffs = tibble()
+
+make_coeffs_table <- function(model_fit, model_name, data_subset){
+  stopifnot(model_name %in% c("rubert", "rugpt", "humans"))
+  stopifnot(data_subset %in% c("acc", "gen", "both"))
+  
+  cbind(list(model=model_name, data=data_subset),  tidy(model_fit, "fixed"))   
+}
+```
+
+
+```{r}
 rubert_comp
 ```
 
@@ -539,17 +558,21 @@ gpt_comp_scores
 mod5_rubert = lmer(score ~ N1 + N2 + kind2 + (1 | Sent), data=rubert_comp_scores)
 summary(mod5_rubert)
 
+mod5_rubert_coeffs = make_coeffs_table(mod5_rubert, "rubert", "both")
+all_coeffs = rbind(all_coeffs, mod5_rubert_coeffs)
+
 info5_rubert <- get_full_lmer_info(mod5_rubert, summary(mod5_rubert))
 
 mod5KR_rubert <- test_lmer_signif_KR(mod5_rubert, c("N1", "N2", "kind2"))
 mod5KR_rubert
 ```
 
-
-
 ```{r}
 mod5_gpt = lmer(score ~ N1 + N2 + kind2 + (1 | Sent), data=gpt_comp_scores)
 summary(mod5_gpt)
+
+mod5_gpt_coeffs = make_coeffs_table(mod5_gpt, "rugpt", "both")
+all_coeffs = rbind(all_coeffs, mod5_gpt_coeffs)
 
 info5_gpt <- get_full_lmer_info(mod5_gpt, summary(mod5_gpt))
 
@@ -566,6 +589,9 @@ rubert_comp_scores %>% filter(Group == 1) -> rubert_comp_scores_acc
 mod5_rubert_acc = lmer(score ~ N1 + N2 + kind2 + (1 | Sent), data=rubert_comp_scores_acc)
 summary(mod5_rubert_acc)
 
+mod5_rubert_acc_coeffs = make_coeffs_table(mod5_rubert_acc, "rubert", "acc")
+all_coeffs = rbind(all_coeffs, mod5_rubert_acc_coeffs)
+
 info5_rubert_acc <- get_full_lmer_info(mod5_rubert_acc, summary(mod5_rubert_acc))
 
 mod5KR_rubert_acc <- test_lmer_signif_KR(mod5_rubert_acc, c("N1", "N2", "kind2"))
@@ -580,6 +606,9 @@ rubert_comp_scores %>%
 
 mod5_rubert_gen = lmer(score ~ N1 + N2 + kind2 + (1 | Sent), data=rubert_comp_scores_gen)
 summary(mod5_rubert_gen)
+
+mod5_rubert_gen_coeffs = make_coeffs_table(mod5_rubert_gen, "rubert", "gen")
+all_coeffs = rbind(all_coeffs, mod5_rubert_gen_coeffs)
 
 info5_rubert_gen <- get_full_lmer_info(mod5_rubert_gen, summary(mod5_rubert_gen))
 
@@ -621,12 +650,16 @@ gpt_comp_scores %>%
 mod5_gpt_acc = lmer(score ~ N1 + N2 + kind2 + (1 | Sent), data=gpt_comp_scores_acc)
 summary(mod5_gpt_acc)
 
+mod5_gpt_acc_coeffs = make_coeffs_table(mod5_gpt_acc, "rugpt", "acc")
+all_coeffs = rbind(all_coeffs, mod5_gpt_acc_coeffs)
+
 info5_gpt_acc <- get_full_lmer_info(mod5_gpt_acc, summary(mod5_gpt_acc))
 
 mod5KR_gpt_acc <- test_lmer_signif_KR(mod5_gpt_acc, c("N1", "N2", "kind2"))
 mod5KR_gpt_acc
 
 ```
+
 
 ```{r}
 gpt_comp_scores %>%
@@ -636,12 +669,14 @@ gpt_comp_scores %>%
 mod5_gpt_gen = lmer(score ~ N1 + N2 + kind2 + (1 | Sent), data=gpt_comp_scores_gen)
 summary(mod5_gpt_gen)
 
+mod5_gpt_gen_coeffs = make_coeffs_table(mod5_gpt_gen, "rugpt", "gen")
+all_coeffs = rbind(all_coeffs, mod5_gpt_gen_coeffs)
+
 info5_gpt_gen <- get_full_lmer_info(mod5_gpt_gen, summary(mod5_gpt_gen))
 
 mod5KR_gpt_gen <- test_lmer_signif_KR(mod5_gpt_gen, c("N1", "N2", "kind2"))
 mod5KR_gpt_gen
 ```
-
 
 
 ### other model plots
@@ -883,6 +918,9 @@ lmer(rt ~ N1 + N2 + kind + (1 | sent) + (1|part),
 
 summary(mod5_humans)
 
+mod5_humans_coeffs = make_coeffs_table(mod5_humans, "humans", "both")
+all_coeffs = rbind(all_coeffs, mod5_humans_coeffs)
+
 info5_humans <- get_full_lmer_info(mod5_humans, summary(mod5_humans))
 
 mod5KR_humans <- test_lmer_signif_KR(mod5_humans, c("N1", "N2", "kind"))
@@ -898,6 +936,9 @@ lmer(rt ~ N1 + N2 + kind + (1 | sent) + (1|part),
   mod5_humans_acc
 
 summary(mod5_humans_acc)
+
+mod5_humans_acc_coeffs = make_coeffs_table(mod5_humans_acc, "humans", "acc")
+all_coeffs = rbind(all_coeffs, mod5_humans_acc_coeffs)
 
 info5_humans_acc <- get_full_lmer_info(mod5_humans_acc, summary(mod5_humans_acc))
 
@@ -917,6 +958,9 @@ lmer(rt ~ N1 + N2 + kind + (1 | sent) + (1|part),
   mod5_humans_gen
 
 summary(mod5_humans_gen)
+
+mod5_humans_gen_coeffs = make_coeffs_table(mod5_humans_gen, "humans", "gen")
+all_coeffs = rbind(all_coeffs, mod5_humans_gen_coeffs)
 
 info5_humans_gen <- get_full_lmer_info(mod5_humans_gen, summary(mod5_humans_gen))
 
@@ -945,755 +989,357 @@ mod5KR_humans_word4
 ```
 
 
-## LMER number of each word to attention values
+### models coefficients plot
 
 ```{r}
-eval_model <- function(formula, data){
-  eval(bquote(lmer(formula, data=data)))
-}
+all_coeffs
+```
+```{r}
+all_coeffs %>%
+  count(model, data)
+
+all_coeffs %>%
+  count(term)
+
+```
+
+```{r}
+all_coeffs %>%
+  mutate(term = case_when(
+    term == "kindungram" ~  "kind2ungram",
+    term == "kindgram" ~  "kind2gram",
+    TRUE ~ term,
+  )) ->
+  all_coeffs
+
+
+all_coeffs %>%
+  count(term)
 ```
 
 
 ```{r}
 
-fit_lmer_on_df <- function(
-    model_df, model_name, n_heads, x_vars, x_random=NULL, use_heads="both", y=NULL
-){
-  # stopifnot(!is.null(y) || use_heads %in% c("both", "subject", "object"))
-  stopifnot(use_heads %in% c("both", "subject", "object"))
+get_humans <- function(df){
+  df %>% filter(model == "humans")
+}
+
+get_models <- function(df){
+  df %>% filter(model != "humans")
+}
+
+
+round_any = function(x, accuracy, f=round){f(x/ accuracy) * accuracy}
+
+find_offset <- function(variable, round_to=6){
+  max_ = max(variable)
+  min_ = min(variable)
+  print(c(max_, min_))
   
-  x_vars2 = x_vars
-  if (use_heads == "both"){
-    x_vars2 = c("Y", x_vars2)
+  round_any((max_ + abs(min_) - 1), round_to, f=ceiling)
+}
+
+get_list_vals <- function(l){
+  unname(unlist(l))
+}
+
+make_minor_breaks <- function(variable, offsets, step=0.5){
+  max_ = ceiling(max(variable))
+  print(max_)
+  
+  minor_breaks = c()
+  for (offset in offsets){
+    minor_breaks = c(minor_breaks, seq(offset - max_, offset + max_, step))
   }
-  params = list(
-    model_name=model_name, n_heads=n_heads,
-    x_vars=x_vars, x_vars2=x_vars2, x_random=x_random, use_heads=use_heads
-  )
   
+  minor_breaks
+}
+
+
+make_coeffs_to_y_center <- function(df, coeffs_order, round_to=6){
+  coeffs_y_step = find_offset(df$estimate, round_to = round_to)
+  print(coeffs_y_step)
   
-  base_x = paste(x_vars, collapse=" + ")
-  if (!is.null(x_random)) {
-    x_random = paste0("(", paste(x_random, collapse = "+"), ")")
-    base_x = paste(base_x, "+", x_random)
+  coeffs_to_y_center = list()
+  for (i in seq_along(coeffs_order)){
+     coeffs_to_y_center = c(coeffs_to_y_center, (i - 1) * coeffs_y_step)
   }
+  coeffs_to_y_center = setNames(coeffs_to_y_center, coeffs_order)
+  coeffs_to_y_center
+}
+
+```
+
+```{r}
+scale_human_subset <- function(df, scale_factor){
+  df %>%
+    mutate(estimate = case_when(
+      model == "humans" ~ estimate / scale_factor,
+      TRUE ~ estimate
+    ))
+}
   
-  
-  results = tibble()
-  
-  for (i in 1:n_heads){
-    meta_info = make_meta_info(i, model_name)
-    df_i = make_df_for_head(model_df, i)
-    
-    subject = make_subj_col(i)
-    object = make_obj_col(i)
-    
-    prepared_df_i = df_i
-    
-    x = base_x
-    if (use_heads == "both"){
-      # https://stackoverflow.com/questions/20525633/r-analyzing-multiple-responses-i-e-dependent-variables-in-a-mixed-effects-mo 
-      # https://stackoverflow.com/questions/69960107/using-lmer-for-multiple-dependent-variables
-      x = paste("Y", "+", x)
-      y = "value"
-      # we melt sh[i], oh[i] which are columns 1 abd 2 respectively
-      df_i %>%
-          melt(., id.vars = 3:ncol(.), variable.name = "Y") %>% 
-          tibble() %>% 
-          arrange(Y) -> 
-        prepared_df_i
-  
-    } else if (use_heads == "subject") {
-      y = subject
-    } else if (use_heads == "object") {
-      y = object
-    }
-    
-    formula = as.formula(
-      paste(y, "~", x)
+```
+
+
+```{r}
+all_coeffs
+```
+
+```{r}
+all_coeffs %>%
+  write_csv("regression_coefficients.csv")
+```
+
+```{r}
+all_coeffs <- read_csv("regression_coefficients.csv")
+all_coeffs
+```
+
+
+
+```{r}
+alpha = 0.05
+
+coeffs_order = c(
+  "(Intercept)",
+  "kind2ungram",
+  "kind2gram",
+  "N2S",
+  "N1S"
+)
+final_names = c(
+  "(Intercept)",
+  "Kind=ungram-\nmatical_feats",
+  "Kind=gram-\nmatical_feats",
+  "Attractor\n Number = S",
+  "Subject\n Number = S"
+)
+model_order = c("rubert", "rugpt", "humans")
+coeffs_y_step = 6
+y_limits = c(-3, 24)
+
+
+all_coeffs_humans <- get_humans(all_coeffs)
+all_coeffs_models <- get_models(all_coeffs)
+
+scale_factor = round_any(max(all_coeffs_humans$estimate) / max(all_coeffs_models$estimate), 5)
+all_coeffs_2 = scale_human_subset(all_coeffs, scale_factor)
+
+coeffs_to_y_center = make_coeffs_to_y_center(all_coeffs_2, coeffs_order, round_to = coeffs_y_step)
+
+get_y_center <- function(coeff){
+  coeffs_to_y_center[[coeff]]
+}
+
+make_range <- function(df){
+  df %>%
+    mutate(
+      is_significant = if_else(p.value < alpha, TRUE, FALSE),
+      coeff_y = sapply(term, get_y_center),
+      estimate2 = coeff_y + estimate,
+      estimate_lower = pmin(estimate2, coeff_y),
+      estimate_upper = pmax(estimate2, coeff_y),
+      estimate_center = (estimate_lower + estimate_upper) / 2,
     )
-    
-    # print(formula)
-    # print(prepared_df_i)
-    
-    
-    model_i <- do.call("lmer", list(formula = formula, data = quote(prepared_df_i)))
-    summary_i = summary(model_i)
-    
-    vars_significance_i = test_lmer_signif_KR(model_i, x_vars2)
-    
-    result_i = get_full_lmer_info(model_i, summary_i)
-    result_i = cbind(meta_info, result_i, vars_significance_i)
-    
-    
-    results <- bind_rows(results, result_i)
-  }
-  
-  list(
-    results = results,
-    params = params
-  )
-}
-  
-  
-```
-
-### "both" - subject and object heads values merged
-
-```{r}
-# 12 heads
-
-rubert_result <- fit_lmer_on_df(
-  rubert, "rubert", 12, 
-  c("N1", "N2", "Pred"), c("1 | Sent"), use_heads="both"
-)
-
-rubert_result$params
-rubert_result$results
-
-# write_csv(rubert_result$results, "rubert_stats_2.csv")
-```
-
-```{r}
-colnames(gpt)
-```
-
-
-```{r}
-# 40 heads...
-
-gpt_result <- fit_lmer_on_df(
-  gpt, "gpt", 40, 
-  c("N1", "N2", "Pred"), c("1 | Sent"), use_heads="both"
-)
-
-gpt_result$params
-gpt_result$results
-
-# write_csv(gpt_result$results, "gpt_stats.csv")
-```
-
-
-## LMER grammaticality kind to head
-
-
-```{r}
-HEAD_KIND_NAME = "Y"
-MELTED_HEADS_NAME = "value"
-SUBJECT_HEAD = "subject"
-DISTRACTOR_HEAD = "object"
-
-make_formula <- function(
-    x_vars, x_random=NULL,
-    y
-){
-  base_x = paste(x_vars, collapse=" + ")
-  if (!is.null(x_random)) {
-    x_random = paste0("(", paste(x_random, collapse = "+"), ")")
-    base_x = paste(base_x, "+", x_random)
-  }
-  
-
-  x = base_x
-  if (y == SUBJECT_HEAD){
-    y = quote(subject)
-    formula = quote(paste(eval(y), "~", x))
-    
-  } else if (y == DISTRACTOR_HEAD){
-    y = quote(object)
-    formula = quote(paste(eval(y), "~", x))
-    
-  } else {
-    formula = paste(y, "~", x)
-  }
-    
-  list(x=x, y=y, formula=formula)
 }
 
 
-fit_lmer_on_df2 <- function(
-    model_df, model_name, n_heads, x_vars, x_random=NULL, y
-    , try_interaction_KR=FALSE
-    , categorial_y = FALSE
-){
-  stat_model_to_call = "lmer"
-  call_args = list()
-  if (categorial_y){
-    stat_model_to_call = "glmer"
-    call_args$family = "binomial"
-  }
-  
-  use_heads=FALSE
-  if (y == MELTED_HEADS_NAME){
-    use_heads="both"
-  }
-  
-  has_interaction_terms = FALSE
-  for (x_var in x_vars){
-    if (str_detect(x_var, ":")){
-      has_interaction_terms = TRUE
-      break
-    }
-  }
-  
-  params = list(
-    model_name=model_name, n_heads=n_heads,
-    x_vars=x_vars, x_random=x_random,
-    y=y, use_heads=use_heads
-  )
-  
-  formula_info = make_formula(x_vars, x_random, y)
-  base_formula = formula_info$formula
-  
-  # print(formula_info)
-  # print(formula)
-  
-  models = c()
-  results = tibble()
-  
-  for (i in 1:n_heads){
-    meta_info = make_meta_info(i, model_name)
-    df_i = make_df_for_head(model_df, i)
-    
-    subject = make_subj_col(i)
-    object = make_obj_col(i)
-    
-    prepared_df_i = df_i
-    
-    if (use_heads == "both"){
-      # https://stackoverflow.com/questions/20525633/r-analyzing-multiple-responses-i-e-dependent-variables-in-a-mixed-effects-mo 
-      # https://stackoverflow.com/questions/69960107/using-lmer-for-multiple-dependent-variables
-      # we melt sh[i], oh[i] which are columns 1 and 2 respectively
-      df_i %>%
-          melt(., id.vars = 3:ncol(.), variable.name = HEAD_KIND_NAME) %>% 
-          tibble() %>% 
-          arrange(HEAD_KIND_NAME) -> 
-        prepared_df_i
+all_coeffs_2 %>% 
+  make_range() %>%
+  mutate(
+    is_significant=factor(is_significant, levels = c(TRUE, FALSE)),
+    data=factor(data, levels = c("both", "acc", "gen")),
+    model=factor(model, levels = model_order)
+  ) ->
+  all_coeffs_3
+
+all_coeffs_3_humans = get_humans(all_coeffs_3)
+all_coeffs_3_models = get_models(all_coeffs_3)
+coeffs_to_y_center <- setNames(coeffs_to_y_center, final_names)
+
+all_coeffs_3 %>%
+  {
+    ggplot(., aes(
+      y=estimate_center, x=model, color=is_significant, linetype=is_significant)
+    ) +
+    geom_linerange(
+      data = all_coeffs_3_models, 
+      mapping = aes(y=estimate_center, ymin=estimate_lower, ymax=estimate_upper), linewidth=1.3
+    ) +
+    geom_linerange(
+      data = all_coeffs_3_humans, 
+      mapping = aes(
+        y=estimate_center, ymin=estimate_lower, ymax=estimate_upper
+      ), linewidth=1.3
+    ) +
+    geom_text(aes(label=round(estimate, 2)), vjust="outward", hjust=-0.2, size=3, fontface="bold") +
+    # scale_y_continuous(name="estimate_center", sec.axis=sec_axis(name="humans estimate_center (s)")) +
+    # scale_color_discrete("cvidis") +
+    scale_color_viridis(discrete = TRUE, option="E", begin=0, end=0.8, direction = 1) +
+    facet_wrap(~data, strip.position = "bottom") +
+    theme(
+      # plot.margin = margin(r = 15, l = 15, unit = "pt"),
+      panel.background = element_rect(
+        fill = "white", colour = "white", size = 0.5, linetype = "solid"
+      ),
+      panel.grid.major = element_line(size = 0.5, linetype = 'solid', colour = "lightgray"), 
+      panel.grid.minor = element_line(size = 0.25, linetype = 'dotted', colour = "lightgray"),
+      panel.spacing = unit(0, "lines"), 
       
-    } 
-    
-    formula = eval(base_formula, formula_info)
-    formula = as.formula(formula)
+      strip.background = element_blank(),
+      strip.clip="off",
+      strip.placement = "outside",
+      strip.text = element_text(size = 12),
+      
+      # base_size=10,
+      text=element_text(family="Times New Roman"),
+      axis.text.x = element_text(angle = 20, hjust = 0.5, vjust = 0.8),
+      axis.title.y = element_text(size=12),
+      
+      legend.position = "none",
+    ) +
+    scale_y_continuous(
+      breaks = get_list_vals(coeffs_to_y_center), labels = names(coeffs_to_y_center),
+      minor_breaks = make_minor_breaks(.$estimate, get_list_vals(coeffs_to_y_center)),
+      sec.axis = dup_axis(name="humans' coefficients / 100 (ms)", labels=NULL)
+    ) +
+    scale_x_discrete(
+      limits = model_order,
+      expand = expansion(add = c(0.6, 0.6)),
+      # guide = guide_axis(n.dodge = 2)
+    ) +
+    labs(x = NULL, y="models' coefficients (log-prob units)")
+  } ->
+  all_coeffs_plot
 
-
-    call_args <- modifyList(
-      call_args,
-      list(formula = formula, data = quote(prepared_df_i))
-    )
-    model_i <- do.call(
-      stat_model_to_call,
-      call_args  
-    )
-    summary_i = summary(model_i)
-    models = c(models, model_i)
-    
-    result_i = get_full_lmer_info(model_i, summary_i, categorial=categorial_y)
-    
-    if (!categorial_y && (!has_interaction_terms | try_interaction_KR)){
-      vars_significance_i = test_lmer_signif_KR(model_i, x_vars)
-      result_i = cbind(meta_info, result_i, vars_significance_i)
-    } else {
-      result_i = cbind(meta_info, result_i)
-    }
-    
-    results <- bind_rows(results, result_i)
-  }
-  
-  list(
-    results = results,
-    params = params,
-    models=models
-  )
-}
-  
-```
-
-
-### without interaction terms
-
-```{r}
-rubert_result <- fit_lmer_on_df2(
-  rubert, "rubert", 12, 
-  c("N1", "N2", "Pred"), c("1 | Sent"),
-  SUBJECT_HEAD
-  # , use_heads="both"
-)
-
-rubert_result$params
-rubert_result$results
-
-# write_csv(rubert_result$results, "rubert_stats_tosubject.csv")
-```
-
-
-```{r}
-rubert_result <- fit_lmer_on_df2(
-  rubert, "rubert", 12, 
-  c("N1", "N2", "Pred"), c("1 | Sent"),
-  DISTRACTOR_HEAD
-  # , use_heads="both"
-)
-
-rubert_result$params
-rubert_result$results
-
-# write_csv(rubert_result$results, "rubert_stats_todistractor.csv")
+all_coeffs_plot
 ```
 
 ```{r}
-rubert_result <- fit_lmer_on_df2(
-  rubert, "rubert", 12, 
-  c("Y", "N1", "N2", "Pred"), c("1 | Sent"),
-  MELTED_HEADS_NAME
-  # , use_heads="both"
-)
+cairo_pdf("regressions_coefficients_06.pdf", width=8, height=4)
 
-rubert_result$params
-rubert_result$results
+all_coeffs_plot
 
-# write_csv(rubert_result$results, "rubert_stats_todistractor.csv")
-```
-
-
-
-```{r}
-gpt_result <- fit_lmer_on_df2(
-  gpt, "gpt", 40, 
-  c("N1", "N2", "Pred"), c("1 | Sent"),
-  SUBJECT_HEAD
-  # , use_heads="both"
-)
-
-gpt_result$params
-gpt_result$results
-
-# write_csv(gpt_result$results, "gpt_stats_tosubject.csv")
+dev.off()
 
 ```
 
 
 ```{r}
-gpt_result <- fit_lmer_on_df2(
-  gpt, "gpt", 40, 
-  c("N1", "N2", "Pred"), c("1 | Sent"),
-  DISTRACTOR_HEAD
-  # , use_heads="both"
-)
+all_coeffs_3_models %>%
+  mutate(model=as.character(model)) %>%
+  {
+    ggplot(., aes(y=estimate_center, x=model, color=is_significant, linetype=is_significant)) +
+    geom_linerange(
+      mapping = aes(y=estimate_center, ymin=estimate_lower, ymax=estimate_upper), linewidth=1.3
+    ) +
+    geom_text(aes(label=round(estimate, 2)), vjust="outward", hjust=-0.2, size=3, fontface="bold") +
+    scale_color_viridis(discrete = TRUE, option="E", begin=0, end=0.8, direction = 1) +
+    facet_wrap(~data, strip.position = "bottom") +
+    theme(
+      # plot.margin = margin(r = 15, l = 15, unit = "pt"),
+      panel.background = element_rect(
+        fill = "white", colour = "white", size = 0.5, linetype = "solid"
+      ),
+      panel.grid.major = element_line(size = 0.5, linetype = 'solid', colour = "lightgray"), 
+      panel.grid.minor = element_line(size = 0.25, linetype = 'dotted', colour = "lightgray"),
+      panel.spacing = unit(0, "lines"), 
+      
+      strip.background = element_blank(),
+      strip.clip="off",
+      strip.placement = "outside",
+      strip.text = element_text(size = 12),
+      
+      # base_size=10,
+      text=element_text(family="Times New Roman"),
+      # axis.text.x = element_text(angle = 20, hjust = 0.5, vjust = 0.8),
+      axis.title.y = element_text(size=12),
+      
+      legend.position = "none",
+    ) +
+    ylim(-6, 27) +
+    scale_y_continuous(
+      breaks = get_list_vals(coeffs_to_y_center), labels = names(coeffs_to_y_center),
+      minor_breaks = make_minor_breaks(.$estimate, get_list_vals(coeffs_to_y_center)),
+      # sec.axis = dup_axis(name="humans' coefficients / 100 (ms)", labels=NULL)
+      limits = y_limits
+    ) +
+    scale_x_discrete(
+      limits = c("rubert", "rugpt"),
+      # expand = expansion(add = c(0.3, 0.3)),
+      # guide = guide_axis(n.dodge = 2)
+    ) +
+    labs(x = NULL, y="models' coefficients (log-prob units)")
+  } ->
+  all_coeffs_models_plot
 
-gpt_result$params
-gpt_result$results
-
-# write_csv(gpt_result$results, "gpt_stats_todistractor.csv")
-```
-
-
-### with interaction terms
-
-#### RuBERT
-
-```{r}
-rubert_result <- fit_lmer_on_df2(
-  rubert, "rubert", 12, 
-  c(
-    "N1", "N2", "Pred"
-    , "Pred:N1", "Pred:N2"
-    , "Pred:N1:N2"
-    ),
-  c("1 | Sent"),
-  MELTED_HEADS_NAME
-  # , use_heads="both"
-)
-
-rubert_result$params
-rubert_result$results
-
-# write_csv(rubert_result$results, "rubert_stats_toboth_int.csv")
-
-
-```
-
-```{r}
-# rubert_result <- fit_lmer_on_df2(
-#   rubert, "rubert", 12, 
-#   c(
-#     "N1", "N2", "Pred"
-#     , "Pred:N1", "Pred:N2"
-#     , "Pred:N1:N2"
-#     ),
-#   c("1 | Sent"),
-#   MELTED_HEADS_NAME
-#   , try_interaction_KR = TRUE
-# )
-
-# rubert_result$params
-# rubert_result$results
-# 
-# write_csv(rubert_result$results, "rubert_stats_toboth_int_KR.csv")
-```
-
-
-```{r}
-rubert_result <- fit_lmer_on_df2(
-  rubert, "rubert", 12, 
-  c(
-    "N1", "N2", "Pred"
-    , "Pred:N1", "Pred:N2"
-    , "Pred:N1:N2"
-    ),
-  c("1 | Sent"),
-  SUBJECT_HEAD
-)
-
-rubert_result$params
-rubert_result$results
-
-# write_csv(rubert_result$results, "rubert_stats_tosubject_int.csv")
+all_coeffs_models_plot
 ```
 
 ```{r}
-# rubert_result <- fit_lmer_on_df2(
-#   rubert, "rubert", 12, 
-#   c(
-#     "N1", "N2", "Pred"
-#     , "Pred:N1", "Pred:N2"
-#     , "Pred:N1:N2"
-#     ),
-#   c("1 | Sent"),
-#   SUBJECT_HEAD,
-#   try_interaction_KR = TRUE
-# )
+cairo_pdf("regressions_coefficients_07_models.pdf", width=6, height=4)
 
-# rubert_result$params
-# rubert_result$results
-# 
-# write_csv(rubert_result$results, "rubert_stats_tosubject_int_KR.csv")
-```
+all_coeffs_models_plot
 
-
-```{r}
-rubert_result <- fit_lmer_on_df2(
-  rubert, "rubert", 12,
-  c(
-    "N1", "N2", "Pred"
-    , "Pred:N1", "Pred:N2"
-    , "Pred:N1:N2"
-    ),
-  c("1 | Sent"),
-  DISTRACTOR_HEAD
-)
-
-rubert_result$params
-rubert_result$results
-
-# write_csv(rubert_result$results, "rubert_stats_todistractor_int.csv")
+dev.off()
 ```
 
 ```{r}
-# rubert_result <- fit_lmer_on_df2(
-#   rubert, "rubert", 12,
-#   c(
-#     "N1", "N2", "Pred"
-#     , "Pred:N1", "Pred:N2"
-#     , "Pred:N1:N2"
-#     ),
-#   c("1 | Sent"),
-#   DISTRACTOR_HEAD,
-#   try_interaction_KR = TRUE
-# )
-# 
-# rubert_result$params
-# rubert_result$results
-# 
-# write_csv(rubert_result$results, "rubert_stats_todistractor_int_KR.csv")
-```
+all_coeffs_3_humans %>%
+  mutate(model=as.character(model)) %>%
+  {
+    ggplot(., aes(y=estimate_center, x=model, color=is_significant, linetype=is_significant)) +
+    geom_linerange(
+      mapping = aes(y=estimate_center, ymin=estimate_lower, ymax=estimate_upper), linewidth=1.3
+    ) +
+    geom_text(aes(label=round(estimate, 2)), vjust="outward", hjust=-0.2, size=3, fontface="bold") +
+    scale_color_viridis(discrete = TRUE, option="E", begin=0, end=0.8, direction = 1) +
+    facet_wrap(~data, strip.position = "bottom") +
+    theme(
+      # plot.margin = margin(r = 15, l = 15, unit = "pt"),
+      panel.background = element_rect(
+        fill = "white", colour = "white", size = 0.5, linetype = "solid"
+      ),
+      panel.grid.major = element_line(size = 0.5, linetype = 'solid', colour = "lightgray"), 
+      panel.grid.minor = element_line(size = 0.25, linetype = 'dotted', colour = "lightgray"),
+      panel.spacing = unit(0, "lines"), 
+      
+      strip.background = element_blank(),
+      strip.clip="off",
+      strip.placement = "outside",
+      strip.text = element_text(size = 12),
+      
+      text=element_text(family="Times New Roman"),
+      # axis.text.x = element_text(size=12),
+      axis.title.y = element_text(size=12),
+      
+      legend.position = "none",
+    ) +
+    scale_y_continuous(
+      breaks = get_list_vals(coeffs_to_y_center),
+      # labels = names(coeffs_to_y_center),
+      labels = NULL,
+      minor_breaks = make_minor_breaks(.$estimate, get_list_vals(coeffs_to_y_center)),
+      sec.axis = dup_axis(name="humans' coefficients / 100 (ms)", labels=NULL),
+      limits = y_limits
+    ) +
+    scale_x_discrete(
+      # limits = c("rubert", "rugpt"),
+      # expand = expansion(add = c(0.3, 0.3)),
+      # guide = guide_axis(n.dodge = 2)
+    ) +
+    labs(x = NULL, y=NULL)
+  } ->
+  all_coeffs_humans_plot
 
-
-
-#### GPT
-
-```{r}
-gpt_result <- fit_lmer_on_df2(
-  gpt, "gpt", 40, 
-  c(
-    "N1", "N2", "Pred"
-    , "Pred:N1", "Pred:N2"
-    , "Pred:N1:N2"
-  ),
-  c("1 | Sent"),
-  MELTED_HEADS_NAME
-)
-
-gpt_result$params
-gpt_result$results
-
-# write_csv(gpt_result$results, "gpt_stats_toboth.csv")
-```
-
-
-```{r}
-gpt_result <- fit_lmer_on_df2(
-  gpt, "gpt", 40, 
-  c(
-    "N1", "N2", "Pred"
-    , "Pred:N1", "Pred:N2"
-    , "Pred:N1:N2"
-  ),
-  c("1 | Sent"),
-  MELTED_HEADS_NAME,
-)
-
-gpt_result$params
-gpt_result$results
-
-# write_csv(gpt_result$results, "gpt_stats_toboth_int.csv")
-```
-
-
-```{r}
-# gpt_result <- fit_lmer_on_df2(
-#   gpt, "gpt", 40, 
-#   c(
-#     "N1", "N2", "Pred"
-#     , "Pred:N1", "Pred:N2"
-#     , "Pred:N1:N2"
-#   ),
-#   c("1 | Sent"),
-#   MELTED_HEADS_NAME,
-#   try_interaction_KR = TRUE
-# )
-# 
-# gpt_result$params
-# gpt_result$results
-# 
-# write_csv(gpt_result$results, "gpt_stats_toboth_int_KR.csv")
-```
-
-
-
-```{r}
-gpt_result <- fit_lmer_on_df2(
-  gpt, "gpt", 40, 
-  c(
-    "N1", "N2", "Pred"
-    , "Pred:N1", "Pred:N2"
-    , "Pred:N1:N2"
-  ),
-  c("1 | Sent"),
-  SUBJECT_HEAD
-)
-
-gpt_result$params
-gpt_result$results
-
-# write_csv(gpt_result$results, "gpt_stats_tosubject.csv")
+all_coeffs_humans_plot
 ```
 
 ```{r}
-gpt_result <- fit_lmer_on_df2(
-  gpt, "gpt", 40, 
-  c(
-    "N1", "N2", "Pred"
-    , "Pred:N1", "Pred:N2"
-    , "Pred:N1:N2"
-  ),
-  c("1 | Sent"),
-  SUBJECT_HEAD
-)
+cairo_pdf("regressions_coefficients_06_humans.pdf", width=3, height=4)
 
-gpt_result$params
-gpt_result$results
+all_coeffs_humans_plot
 
-# write_csv(gpt_result$results, "gpt_stats_tosubject_int.csv")
-```
-
-
-
-```{r}
-# gpt_result <- fit_lmer_on_df2(
-#   gpt, "gpt", 40, 
-#   c(
-#     "N1", "N2", "Pred"
-#     , "Pred:N1", "Pred:N2"
-#     , "Pred:N1:N2"
-#   ),
-#   c("1 | Sent"),
-#   SUBJECT_HEAD,
-#   try_interaction_KR = TRUE
-# )
-# 
-# gpt_result$params
-# gpt_result$results
-# 
-# write_csv(gpt_result$results, "gpt_stats_tosubject_int_KR.csv")
-```
-
-
-```{r}
-gpt_result <- fit_lmer_on_df2(
-  gpt, "gpt", 40, 
-  c(
-    "N1", "N2", "Pred"
-    , "Pred:N1", "Pred:N2"
-    , "Pred:N1:N2"
-  ),
-  c("1 | Sent"),
-  DISTRACTOR_HEAD
-)
-
-gpt_result$params
-gpt_result$results
-
-# write_csv(gpt_result$results, "gpt_stats_todistractor.csv")
-```
-
-
-```{r}
-gpt_result <- fit_lmer_on_df2(
-  gpt, "gpt", 40, 
-  c(
-    "N1", "N2", "Pred"
-    , "Pred:N1", "Pred:N2"
-    , "Pred:N1:N2"
-  ),
-  c("1 | Sent"),
-  DISTRACTOR_HEAD
-)
-
-gpt_result$params
-gpt_result$results
-
-# write_csv(gpt_result$results, "gpt_stats_todistractor_int.csv")
-```
-
-
-```{r}
-# gpt_result <- fit_lmer_on_df2(
-#   gpt, "gpt", 40, 
-#   c(
-#     "N1", "N2", "Pred"
-#     , "Pred:N1", "Pred:N2"
-#     , "Pred:N1:N2"
-#   ),
-#   c("1 | Sent"),
-#   DISTRACTOR_HEAD,
-#   try_interaction_KR = TRUE
-# )
-# 
-# gpt_result$params
-# gpt_result$results
-# 
-# write_csv(gpt_result$results, "gpt_stats_todistractor_int_KR.csv")
-```
-
-
-
-## Tests for predicted predicate number (RUBERT)
-
-```{r}
-colnames(rubert)
-```
-
-
-```{r}
-eval_over_different_y <- function(
-    model_df, model_name, n_heads=1, x_vars, x_random=NULL, y_vars,
-    name_before_first_underscore=TRUE, filename, ...
-  ){
-  full_result = NULL
-  
-  for (var in y_vars){
-    name = var
-    if (name_before_first_underscore){
-      name = str_split_1(var, "_")[1]
-    }
-    print(name)
-    
-    model_result <- fit_lmer_on_df2(
-      model_df, model_name, n_heads, 
-      x_vars, x_random,
-      var,
-      ...
-    )
-    
-    print(model_result$params)
-    print(model_result$results)
-    
-    var_result = model_result$results
-    var_result = cbind(var, var_result)
-    full_result = bind_rows(full_result, var_result)
-  }
-  
-  print(filename)
-  write_csv(full_result, filename)
-  
-  print(full_result)
-  full_result
-} 
-```
-
-### Numeric
-
-```{r}
-
-rubert %>% mutate(
-  verb_sing_score = left_bert_is_singular_score - left_bert_is_plural_score,
-  verb_num_predicted = as.factor(case_when(
-    verb_sing_score >= 0 ~ "S",
-    TRUE ~ "P"
-  )),
-  
-  particip_sing_score = pred_left_bert_is_singular_score - pred_left_bert_is_plural_score,
-  particip_num_predicted = as.factor(case_when(
-    particip_sing_score >= 0 ~ "S",
-    TRUE ~ "P"
-  )),
-  
-  predic_sing_score = pred_full_bert_is_singular_score - pred_full_bert_is_plural_score,
-  predic_num_predicted = as.factor(case_when(
-    predic_sing_score >= 0 ~ "S",
-    TRUE ~ "P"
-  ))
-) -> rubert
-
-```
-
-
-```{r}
-y_vars = c("verb_sing_score", "particip_sing_score", "predic_sing_score")
-eval_over_different_y(
-  rubert, "rubert", 1, 
-  c("N1", "N2"), c("1 | Sent"),
-  y_vars, filename = "rubert_stats_pred_number.csv"
-)
-```
-
-
-```{r}
-y_vars = c("verb_sing_score", "particip_sing_score", "predic_sing_score")
-eval_over_different_y(
-  rubert, "rubert", 1, 
-  c(
-    "N1", "N2", "Pred"
-    , "Pred:N1", "Pred:N2"
-    , "Pred:N1:N2"
-  ),
-  c("1 | Sent"),
-  y_vars, filename = "rubert_stats_pred_number_int.csv"
-)
-```
-
-
-```{r}
-# y_vars = c("verb_sing_score", "particip_sing_score", "predic_sing_score")
-# eval_over_different_y(
-#   rubert, "rubert", 1, 
-#   c(
-#     "N1", "N2", "Pred"
-#     , "Pred:N1", "Pred:N2"
-#     , "Pred:N1:N2"
-#   ),
-#   c("1 | Sent"),
-#   y_vars, filename = "rubert_stats_pred_number_int_KR.csv",
-#   try_interaction_KR=TRUE
-# )
+dev.off()
 ```
